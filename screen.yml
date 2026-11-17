@@ -1,0 +1,56 @@
+# Runs the CAN SLIM screener every weekday and publishes the phone app.
+# This file must live at:  .github/workflows/screen.yml
+name: CAN SLIM screen
+
+on:
+  schedule:
+    - cron: "30 6 * * 1-5"    # ~5:30pm Sydney, after the ASX closes
+    - cron: "30 22 * * 1-5"   # ~9:30am Sydney, after Wall Street closes
+  workflow_dispatch:          # lets you press "Run workflow" any time
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libraries
+        run: pip install yfinance pandas requests lxml
+
+      - name: Build app folder
+        run: |
+          mkdir -p site
+          cp index.html manifest.json sw.js icon-192.png icon-512.png site/
+          # Start from the last published results, so a failed screen never blanks the app
+          curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/results.json" \
+            -o site/results.json || echo "No previous results yet"
+
+      - name: Run CAN SLIM screen (ASX 200 + S&P 500)
+        run: python canslim_screener.py --market both --json site/results.json
+        continue-on-error: true
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
